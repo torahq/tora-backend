@@ -62,6 +62,19 @@ func routes(s Store, now func() time.Time) http.Handler {
 		writeJSON(w, http.StatusOK, m)
 	})
 
+	mux.HandleFunc("GET /v1/predict/compare", func(w http.ResponseWriter, r *http.Request) {
+		rows, err := s.Compare(r.Context())
+		if err != nil {
+			slog.Error("read compare", "err", err)
+			writeJSON(w, http.StatusServiceUnavailable, errBody("compare unavailable"))
+			return
+		}
+		if rows == nil {
+			rows = []json.RawMessage{}
+		}
+		writeJSON(w, http.StatusOK, rows)
+	})
+
 	tokenAddrRe := regexp.MustCompile(`^0x[0-9a-f]{40}$`)
 
 	mux.HandleFunc("GET /v1/elysium/tokens", func(w http.ResponseWriter, r *http.Request) {

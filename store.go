@@ -23,6 +23,8 @@ type Store interface {
 	KnownTokens(ctx context.Context, addrs []string) (map[string]bool, error)
 	ElysiumTokens(ctx context.Context, q string, limit int) ([]elyTokenRow, error)
 	ElysiumPools(ctx context.Context, tokens []string) ([]elyPool, error)
+	SaveCompare(ctx context.Context, qs []cmpQuestion) error
+	Compare(ctx context.Context) ([]json.RawMessage, error)
 	Health(ctx context.Context) (postgres, redis bool)
 }
 
@@ -225,6 +227,55 @@ func (d db) ElysiumPools(ctx context.Context, tokens []string) ([]elyPool, error
 			return nil, err
 		}
 		out = append(out, p)
+	}
+	return out, rows.Err()
+}
+
+// SaveCompare replaces every comparison row in one transaction: a failed build keeps the old rows and
+// their age stays visible in updated_at.
+func (d db) SaveCompare(ctx context.Context, qs []cmpQuestion) error {
+	tx, err := d.pg.Begin(ctx)
+	if err != nil {
+		return err
+	}
+	defer func() { _ = tx.Rollback(ctx) }()
+	if _, err := tx.Exec(ctx, `delete from predict_compare`); err != nil {
+		return err
+	}
+	if len(qs) > 0 {
+		b := &pgx.Batch{}
+		for _, q := range qs {
+			payload, err := json.Marshal(q)
+			if err != nil {
+				return err
+			}
+			b.Queue(`insert into predict_compare (question, starts_at, title, payload, updated_at)
+				values ($1, $2, $3, $4, $5)`,
+				q.Question, q.StartsAt, q.Title, string(payload), q.UpdatedAt)
+		}
+		if err := tx.SendBatch(ctx, b).Close(); err != nil {
+			return err
+		}
+	}
+	return tx.Commit(ctx)
+}
+
+// Compare returns the stored payloads in display order: soonest start first, questions without a start
+// time last, then by title.
+func (d db) Compare(ctx context.Context) ([]json.RawMessage, error) {
+	rows, err := d.pg.Query(ctx, `select payload from predict_compare
+		order by starts_at asc nulls last, title`)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out []json.RawMessage
+	for rows.Next() {
+		var b []byte
+		if err := rows.Scan(&b); err != nil {
+			return nil, err
+		}
+		out = append(out, json.RawMessage(b))
 	}
 	return out, rows.Err()
 }

@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"encoding/json"
 	"os"
 	"strings"
 	"testing"
@@ -181,6 +182,59 @@ func TestElysiumPoolsAndTokens(t *testing.T) {
 	rows, err = d.ElysiumTokens(ctx, "", 3)
 	if err != nil || len(rows) != 3 {
 		t.Errorf("limit: %+v %v", rows, err)
+	}
+}
+
+func TestCompareReplacesRowsAndOrders(t *testing.T) {
+	d := testDB(t)
+	ctx := context.Background()
+	if _, err := d.pg.Exec(ctx, `delete from predict_compare`); err != nil {
+		t.Fatal(err)
+	}
+
+	now := time.Now().UTC()
+	early, late := now.Add(time.Hour), now.Add(2*time.Hour)
+	if err := d.SaveCompare(ctx, []cmpQuestion{
+		{Question: 1, Title: "late match", StartsAt: &late, UpdatedAt: now},
+		{Question: 2, Title: "season winner", UpdatedAt: now},
+		{Question: 3, Title: "early match", StartsAt: &early, UpdatedAt: now},
+	}); err != nil {
+		t.Fatal(err)
+	}
+	rows, err := d.Compare(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(rows) != 3 {
+		t.Fatalf("rows = %d, want 3", len(rows))
+	}
+	var got []cmpQuestion
+	for _, r := range rows {
+		var q cmpQuestion
+		if err := json.Unmarshal(r, &q); err != nil {
+			t.Fatalf("payload is not a cmpQuestion: %v", err)
+		}
+		got = append(got, q)
+	}
+	// soonest start first, a question without one last
+	if got[0].Question != 3 || got[1].Question != 1 || got[2].Question != 2 {
+		t.Errorf("order = %d %d %d, want 3 1 2", got[0].Question, got[1].Question, got[2].Question)
+	}
+	if got[1].StartsAt == nil || !got[1].StartsAt.Equal(late) || got[2].StartsAt != nil {
+		t.Errorf("startsAt round trip = %v %v", got[1].StartsAt, got[2].StartsAt)
+	}
+
+	// a second save replaces every row, including the ones that are gone
+	if err := d.SaveCompare(ctx, []cmpQuestion{{Question: 9, Title: "only", StartsAt: &early, UpdatedAt: now}}); err != nil {
+		t.Fatal(err)
+	}
+	rows, err = d.Compare(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var only cmpQuestion
+	if len(rows) != 1 || json.Unmarshal(rows[0], &only) != nil || only.Question != 9 {
+		t.Errorf("after replace = %s", rows)
 	}
 }
 
