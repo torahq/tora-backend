@@ -112,12 +112,20 @@ func (v venues) kalshiEventByTicker(ctx context.Context, ticker string) (kalshiE
 	return res.Event, nil
 }
 
-// pacer keeps Kalshi calls 250 ms apart. Their unauthenticated rate limit is undocumented, so stay low.
-type pacer struct{ last time.Time }
+// pacer keeps calls a fixed gap apart. A zero gap means 250 ms: Kalshi's unauthenticated rate limit is
+// undocumented, so stay low.
+type pacer struct {
+	last time.Time
+	gap  time.Duration
+}
 
 func (p *pacer) wait() {
+	gap := p.gap
+	if gap == 0 {
+		gap = 250 * time.Millisecond
+	}
 	if !p.last.IsZero() {
-		if d := 250*time.Millisecond - time.Since(p.last); d > 0 {
+		if d := gap - time.Since(p.last); d > 0 {
 			time.Sleep(d)
 		}
 	}

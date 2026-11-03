@@ -13,6 +13,9 @@ import (
 // pulseStaleAfter is three missed 15 s polls.
 const pulseStaleAfter = 45 * time.Second
 
+// perpsAssetRe accepts a Hyperliquid coin name: BTC, kPEPE, 1MBABYDOGE.
+var perpsAssetRe = regexp.MustCompile(`^[A-Za-z0-9]{1,20}$`)
+
 func writeJSON(w http.ResponseWriter, code int, v any) {
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(code)
@@ -73,6 +76,41 @@ func routes(s Store, now func() time.Time) http.Handler {
 			rows = []json.RawMessage{}
 		}
 		writeJSON(w, http.StatusOK, rows)
+	})
+
+	mux.HandleFunc("GET /v1/perps/compare", func(w http.ResponseWriter, r *http.Request) {
+		asset := r.URL.Query().Get("asset")
+		if asset == "" {
+			assets, at, err := s.PerpsAssets(r.Context())
+			if err != nil {
+				slog.Error("read perps assets", "err", err)
+				writeJSON(w, http.StatusServiceUnavailable, errBody("perps compare unavailable"))
+				return
+			}
+			if assets == nil {
+				assets = []string{}
+			}
+			writeJSON(w, http.StatusOK, struct {
+				UpdatedAt time.Time `json:"updatedAt"`
+				Assets    []string  `json:"assets"`
+			}{at, assets})
+			return
+		}
+		if !perpsAssetRe.MatchString(asset) {
+			writeJSON(w, http.StatusBadRequest, errBody("bad asset"))
+			return
+		}
+		payload, ok, err := s.PerpsCompare(r.Context(), asset)
+		if err != nil {
+			slog.Error("read perps compare", "err", err)
+			writeJSON(w, http.StatusServiceUnavailable, errBody("perps compare unavailable"))
+			return
+		}
+		if !ok {
+			writeJSON(w, http.StatusNotFound, errBody("no other venue lists this market"))
+			return
+		}
+		writeJSON(w, http.StatusOK, payload)
 	})
 
 	tokenAddrRe := regexp.MustCompile(`^0x[0-9a-f]{40}$`)

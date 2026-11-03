@@ -25,6 +25,9 @@ type Store interface {
 	ElysiumPools(ctx context.Context, tokens []string) ([]elyPool, error)
 	SaveCompare(ctx context.Context, qs []cmpQuestion) error
 	Compare(ctx context.Context) ([]json.RawMessage, error)
+	SavePerpsCompare(ctx context.Context, rows []perpRow) error
+	PerpsCompare(ctx context.Context, asset string) (json.RawMessage, bool, error)
+	PerpsAssets(ctx context.Context) ([]string, time.Time, error)
 	Health(ctx context.Context) (postgres, redis bool)
 }
 
@@ -278,6 +281,72 @@ func (d db) Compare(ctx context.Context) ([]json.RawMessage, error) {
 		out = append(out, json.RawMessage(b))
 	}
 	return out, rows.Err()
+}
+
+// SavePerpsCompare replaces every perps comparison row in one transaction: a failed build keeps the
+// old rows and their age stays visible in updated_at.
+func (d db) SavePerpsCompare(ctx context.Context, rows []perpRow) error {
+	tx, err := d.pg.Begin(ctx)
+	if err != nil {
+		return err
+	}
+	defer func() { _ = tx.Rollback(ctx) }()
+	if _, err := tx.Exec(ctx, `delete from perps_compare`); err != nil {
+		return err
+	}
+	if len(rows) > 0 {
+		b := &pgx.Batch{}
+		for _, r := range rows {
+			payload, err := json.Marshal(r)
+			if err != nil {
+				return err
+			}
+			b.Queue(`insert into perps_compare (asset, hl_volume, payload, updated_at)
+				values ($1, $2, $3, $4)`,
+				r.Asset, r.hlVolume, string(payload), r.UpdatedAt)
+		}
+		if err := tx.SendBatch(ctx, b).Close(); err != nil {
+			return err
+		}
+	}
+	return tx.Commit(ctx)
+}
+
+// PerpsCompare returns one stored comparison. A missing asset means no other venue lists it.
+func (d db) PerpsCompare(ctx context.Context, asset string) (json.RawMessage, bool, error) {
+	var b []byte
+	err := d.pg.QueryRow(ctx, `select payload from perps_compare where asset = $1`, asset).Scan(&b)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return nil, false, nil
+	}
+	if err != nil {
+		return nil, false, err
+	}
+	return json.RawMessage(b), true, nil
+}
+
+// PerpsAssets lists the compared assets by Hyperliquid volume, plus the newest build time. An empty
+// table returns no assets and a zero time.
+func (d db) PerpsAssets(ctx context.Context) ([]string, time.Time, error) {
+	rows, err := d.pg.Query(ctx, `select asset, updated_at from perps_compare order by hl_volume desc`)
+	if err != nil {
+		return nil, time.Time{}, err
+	}
+	defer rows.Close()
+	var assets []string
+	var newest time.Time
+	for rows.Next() {
+		var asset string
+		var at time.Time
+		if err := rows.Scan(&asset, &at); err != nil {
+			return nil, time.Time{}, err
+		}
+		assets = append(assets, asset)
+		if at.After(newest) {
+			newest = at.UTC()
+		}
+	}
+	return assets, newest, rows.Err()
 }
 
 func (d db) Health(ctx context.Context) (bool, bool) {

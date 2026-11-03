@@ -238,6 +238,56 @@ func TestCompareReplacesRowsAndOrders(t *testing.T) {
 	}
 }
 
+func TestPerpsCompareReplacesRowsAndOrders(t *testing.T) {
+	d := testDB(t)
+	ctx := context.Background()
+	if _, err := d.pg.Exec(ctx, `delete from perps_compare`); err != nil {
+		t.Fatal(err)
+	}
+
+	now := time.Now().UTC().Truncate(time.Microsecond)
+	oi := 1.0
+	first := []perpRow{
+		{Asset: "BTC", UpdatedAt: now, Venues: []perpQuote{{Venue: "hyperliquid", Mark: 77759, OIUSD: &oi}}, hlVolume: 2_000_000_000},
+		{Asset: "ETH", UpdatedAt: now, Venues: []perpQuote{{Venue: "hyperliquid", Mark: 2288}}, hlVolume: 600_000_000},
+	}
+	if err := d.SavePerpsCompare(ctx, first); err != nil {
+		t.Fatal(err)
+	}
+	assets, at, err := d.PerpsAssets(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(assets) != 2 || assets[0] != "BTC" || assets[1] != "ETH" {
+		t.Errorf("assets = %v, want BTC ETH by volume", assets)
+	}
+	if !at.Equal(now) {
+		t.Errorf("updatedAt = %v, want %v", at, now)
+	}
+
+	payload, ok, err := d.PerpsCompare(ctx, "BTC")
+	if err != nil || !ok {
+		t.Fatalf("BTC = %v %v", ok, err)
+	}
+	var row perpRow
+	if err := json.Unmarshal(payload, &row); err != nil || row.Asset != "BTC" || len(row.Venues) != 1 || row.Venues[0].Mark != 77759 {
+		t.Errorf("payload = %s (%v)", payload, err)
+	}
+	if _, ok, err := d.PerpsCompare(ctx, "NOPE"); err != nil || ok {
+		t.Errorf("unknown asset = %v %v, want missing", ok, err)
+	}
+
+	// a second save replaces every row, including the ones that are gone
+	later := now.Add(time.Minute)
+	if err := d.SavePerpsCompare(ctx, []perpRow{{Asset: "SOL", UpdatedAt: later, hlVolume: 1}}); err != nil {
+		t.Fatal(err)
+	}
+	assets, at, err = d.PerpsAssets(ctx)
+	if err != nil || len(assets) != 1 || assets[0] != "SOL" || !at.Equal(later) {
+		t.Errorf("after replace = %v %v %v", assets, at, err)
+	}
+}
+
 func TestElysiumCursorAndKnownTokens(t *testing.T) {
 	d := testDB(t)
 	ctx := context.Background()

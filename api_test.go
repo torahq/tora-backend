@@ -6,19 +6,23 @@ import (
 	"errors"
 	"net/http"
 	"net/http/httptest"
+	"net/url"
 	"strings"
 	"testing"
 	"time"
 )
 
 type fakeStore struct {
-	pulse    *Pulse
-	featured *Market
-	tokens   []elyTokenRow
-	pools    []elyPool
-	compare  []json.RawMessage
-	err      error
-	pg, rd   bool
+	pulse       *Pulse
+	featured    *Market
+	tokens      []elyTokenRow
+	pools       []elyPool
+	compare     []json.RawMessage
+	perps       map[string]json.RawMessage
+	perpsAssets []string
+	perpsAt     time.Time
+	err         error
+	pg, rd      bool
 }
 
 func (f fakeStore) SavePulse(context.Context, Pulse) error        { return nil }
@@ -43,6 +47,14 @@ func (f fakeStore) ElysiumPools(context.Context, []string) ([]elyPool, error) {
 func (f fakeStore) SaveCompare(context.Context, []cmpQuestion) error { return f.err }
 func (f fakeStore) Compare(context.Context) ([]json.RawMessage, error) {
 	return f.compare, f.err
+}
+func (f fakeStore) SavePerpsCompare(context.Context, []perpRow) error { return f.err }
+func (f fakeStore) PerpsCompare(_ context.Context, asset string) (json.RawMessage, bool, error) {
+	payload, ok := f.perps[asset]
+	return payload, ok, f.err
+}
+func (f fakeStore) PerpsAssets(context.Context) ([]string, time.Time, error) {
+	return f.perpsAssets, f.perpsAt, f.err
 }
 func (f fakeStore) Pulse(context.Context) (Pulse, bool, error) {
 	if f.pulse == nil {
@@ -138,6 +150,53 @@ func TestCompareEndpoint(t *testing.T) {
 	var e map[string]any
 	if err := json.Unmarshal(body, &e); err != nil || code != 503 || e["error"] != "compare unavailable" {
 		t.Errorf("store error: %d %v", code, e)
+	}
+}
+
+func TestPerpsCompareEndpoint(t *testing.T) {
+	payload := json.RawMessage(`{"asset":"BTC","venues":[{"venue":"hyperliquid"},{"venue":"aster"}]}`)
+	store := fakeStore{perps: map[string]json.RawMessage{"BTC": payload}}
+
+	code, raw := getRaw(t, store, "/v1/perps/compare?asset=BTC")
+	if code != 200 || !strings.Contains(string(raw), `"asset":"BTC"`) || !strings.Contains(string(raw), `"aster"`) {
+		t.Errorf("asset: %d %s", code, raw)
+	}
+
+	for _, bad := range []string{"btc-usdt", "BTC USDT", "btc/usdt", strings.Repeat("A", 21)} {
+		code, body := get(t, fakeStore{}, "/v1/perps/compare?asset="+url.QueryEscape(bad))
+		if code != 400 || body["error"] != "bad asset" {
+			t.Errorf("%q: %d %v", bad, code, body)
+		}
+	}
+
+	code, body := get(t, store, "/v1/perps/compare?asset=NOPE")
+	if code != 404 || body["error"] != "no other venue lists this market" {
+		t.Errorf("missing: %d %v", code, body)
+	}
+
+	code, body = get(t, fakeStore{err: errors.New("pg down")}, "/v1/perps/compare?asset=BTC")
+	if code != 503 || body["error"] != "perps compare unavailable" {
+		t.Errorf("store error: %d %v", code, body)
+	}
+
+	code, body = get(t, fakeStore{}, "/v1/perps/compare")
+	assets, _ := body["assets"].([]any)
+	if code != 200 || len(assets) != 0 {
+		t.Errorf("empty list: %d %v", code, body)
+	}
+
+	code, body = get(t, fakeStore{perpsAssets: []string{"BTC", "ETH"}, perpsAt: clock}, "/v1/perps/compare")
+	assets, _ = body["assets"].([]any)
+	if code != 200 || len(assets) != 2 || assets[0] != "BTC" || assets[1] != "ETH" {
+		t.Errorf("list: %d %v", code, body)
+	}
+	if body["updatedAt"] != "2026-11-04T12:00:00Z" {
+		t.Errorf("updatedAt = %v", body["updatedAt"])
+	}
+
+	code, _ = get(t, fakeStore{err: errors.New("pg down")}, "/v1/perps/compare")
+	if code != 503 {
+		t.Errorf("list store error: %d", code)
 	}
 }
 

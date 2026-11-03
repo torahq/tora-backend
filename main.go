@@ -65,10 +65,17 @@ func run(ctx context.Context) error {
 		Kalshi: env("KALSHI_URL", "https://api.elections.kalshi.com/trade-api/v2"),
 		Client: &http.Client{Timeout: 15 * time.Second},
 	}
+	pv := perpsVenues{
+		Aster:   env("ASTER_URL", "https://fapi.asterdex.com"),
+		Lighter: env("LIGHTER_URL", "https://mainnet.zklighter.elliot.ai"),
+		GMX:     env("GMX_URL", "https://arbitrum.gmxapi.io/v1"),
+		Client:  &http.Client{Timeout: 15 * time.Second},
+	}
 	go every(ctx, 15*time.Second, "pulse", pollPulse(hl, store))
 	go every(ctx, 30*time.Second, "outcomes", pollOutcomes(hl, store))
 	go everyWithin(ctx, 60*time.Second, "elysium", 5*time.Minute, pollElysium(elys, store))
 	go everyWithin(ctx, 60*time.Second, "compare", 45*time.Second, pollCompare(hl, cmp, store))
+	go everyWithin(ctx, 60*time.Second, "perps", 45*time.Second, pollPerpsCompare(hl, pv, store))
 
 	srv := &http.Server{Addr: env("ADDR", "127.0.0.1:8790"), Handler: routes(store, time.Now), ReadHeaderTimeout: 5 * time.Second}
 	go func() {
