@@ -165,6 +165,7 @@ func (d db) KnownTokens(ctx context.Context, addrs []string) (map[string]bool, e
 }
 
 // elysiumTokensSQL orders native HYPE first, then USDC and WHYPE, then by how many pools hold a token.
+// ponytail: counts every pool per request (about 300 ms at 176k pools); keep a pools column updated by the indexer if it grows past the app's 2 s timeout.
 const elysiumTokensSQL = `with t as (
 	select address, symbol, name, decimals from elysium_tokens
 	where address <> '0x0000000000000000000000000000000000000000'
