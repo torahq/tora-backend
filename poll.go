@@ -9,8 +9,13 @@ import (
 
 // every runs fn now and then on each tick until ctx ends. A failure is logged; the last good data stays in place.
 func every(ctx context.Context, d time.Duration, name string, fn func(context.Context) error) {
+	everyWithin(ctx, d, name, 10*time.Second, fn)
+}
+
+// everyWithin is every with a per-run timeout of its own.
+func everyWithin(ctx context.Context, d time.Duration, name string, timeout time.Duration, fn func(context.Context) error) {
 	run := func() {
-		c, cancel := context.WithTimeout(ctx, 10*time.Second)
+		c, cancel := context.WithTimeout(ctx, timeout)
 		defer cancel()
 		if err := fn(c); err != nil && ctx.Err() == nil {
 			slog.Warn("poll failed", "loop", name, "err", err)

@@ -13,6 +13,8 @@ import (
 type fakeStore struct {
 	pulse    *Pulse
 	featured *Market
+	tokens   []elyTokenRow
+	pools    []elyPool
 	err      error
 	pg, rd   bool
 }
@@ -20,6 +22,22 @@ type fakeStore struct {
 func (f fakeStore) SavePulse(context.Context, Pulse) error        { return nil }
 func (f fakeStore) UpsertMarkets(context.Context, []Market) error { return nil }
 func (f fakeStore) Health(context.Context) (bool, bool)           { return f.pg, f.rd }
+func (f fakeStore) UpsertElysium(context.Context, []elyPool, []elyToken) error {
+	return nil
+}
+func (f fakeStore) ElysiumCursor(context.Context, string) (int64, bool, error) {
+	return 0, false, f.err
+}
+func (f fakeStore) SetElysiumCursor(context.Context, string, int64) error { return nil }
+func (f fakeStore) KnownTokens(context.Context, []string) (map[string]bool, error) {
+	return map[string]bool{}, nil
+}
+func (f fakeStore) ElysiumTokens(context.Context, string, int) ([]elyTokenRow, error) {
+	return f.tokens, f.err
+}
+func (f fakeStore) ElysiumPools(context.Context, []string) ([]elyPool, error) {
+	return f.pools, f.err
+}
 func (f fakeStore) Pulse(context.Context) (Pulse, bool, error) {
 	if f.pulse == nil {
 		return Pulse{}, false, f.err

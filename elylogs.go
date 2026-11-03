@@ -44,6 +44,12 @@ type elyToken struct {
 	Decimals int    `json:"decimals"`
 }
 
+// elyTokenRow is a token plus how many indexed pools hold it.
+type elyTokenRow struct {
+	elyToken
+	Pools int `json:"pools"`
+}
+
 const (
 	topicPairCreated = "0x0d3648bd0f6ba80134a33ba9275ac585d9d315f0ad8355cddefde31afa28d0e9"
 	topicPoolCreated = "0x783cca1c0412dd0d695e784568c96da2e9c22ff989357a2e8b1d9b2b4e6b7118"

@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"os"
+	"strings"
 	"testing"
 	"time"
 
@@ -79,5 +80,141 @@ func TestPulseRoundTrip(t *testing.T) {
 	got, ok, err := d.Pulse(ctx)
 	if err != nil || !ok || got.Markets != 3 || got.Gainer.Coin != "BTC" || !got.UpdatedAt.Equal(p.UpdatedAt) {
 		t.Fatalf("got %+v %v %v", got, ok, err)
+	}
+}
+
+func TestElysiumPoolsAndTokens(t *testing.T) {
+	d := testDB(t)
+	ctx := context.Background()
+	for _, q := range []string{`delete from elysium_pools`, `delete from elysium_tokens`, `delete from elysium_cursor`} {
+		if _, err := d.pg.Exec(ctx, q); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	const (
+		usdc  = "0x7d29d8047b905000459c0e80c34a26ceedcb47b2"
+		whype = "0xcd57f65c2b0e5881cfc2e609f7cd53b746e1f234"
+		aaa   = "0x1111111111111111111111111111111111111111"
+		bbb   = "0x2222222222222222222222222222222222222222"
+		hook  = "0xda605da70bff4b32a9b379c614a6d9e4a09baaec"
+	)
+	pools := []elyPool{
+		{Venue: "test-v2", Kind: "v2", Pool: "0x3333333333333333333333333333333333333333", Token0: usdc, Token1: aaa, Fee: 3000, Hooks: zeroAddr, Block: 1},
+		{Venue: "test-v3", Kind: "v3", Pool: "0x4444444444444444444444444444444444444444", Token0: aaa, Token1: bbb, Fee: 500, TickSpacing: 10, Hooks: zeroAddr, Block: 2},
+		{Venue: "test-v4", Kind: "v4", Pool: "0x5555555555555555555555555555555555555555", Token0: zeroAddr, Token1: whype, Fee: 3000, TickSpacing: 60, Hooks: hook, Block: 3},
+	}
+	tokens := []elyToken{
+		{Address: usdc, Symbol: "USDC", Name: "USD Coin", Decimals: 6},
+		{Address: whype, Symbol: "WHYPE", Name: "Wrapped HYPE", Decimals: 18},
+		{Address: aaa, Symbol: "AAA", Name: "Alpha", Decimals: 18},
+		{Address: bbb, Symbol: "BBB", Name: "Beta", Decimals: 18},
+	}
+	if err := d.UpsertElysium(ctx, pools, tokens); err != nil {
+		t.Fatal(err)
+	}
+
+	// set filtering: only pools holding both requested tokens
+	cases := []struct {
+		tokens []string
+		want   string
+	}{
+		{[]string{usdc, aaa}, "test-v2"},
+		{[]string{aaa, bbb}, "test-v3"},
+		{[]string{zeroAddr, whype}, "test-v4"},
+		{[]string{usdc, bbb}, ""},
+	}
+	for _, c := range cases {
+		got, err := d.ElysiumPools(ctx, c.tokens)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if c.want == "" {
+			if len(got) != 0 {
+				t.Errorf("%v: got %d pools, want none", c.tokens, len(got))
+			}
+			continue
+		}
+		if len(got) != 1 || got[0].Venue != c.want || got[0].Block == 0 {
+			t.Errorf("%v: got %+v, want %s", c.tokens, got, c.want)
+		}
+	}
+
+	// token ordering: HYPE, USDC, WHYPE first, then by pool count
+	rows, err := d.ElysiumTokens(ctx, "", 10)
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := []struct {
+		address string
+		symbol  string
+		pools   int
+	}{
+		{zeroAddr, "HYPE", 1},
+		{usdc, "USDC", 1},
+		{whype, "WHYPE", 1},
+		{aaa, "AAA", 2},
+		{bbb, "BBB", 1},
+	}
+	if len(rows) != len(want) {
+		t.Fatalf("tokens = %+v, want %d rows", rows, len(want))
+	}
+	for i, w := range want {
+		if rows[i].Address != w.address || rows[i].Symbol != w.symbol || rows[i].Pools != w.pools {
+			t.Errorf("row %d = %+v, want %+v", i, rows[i], w)
+		}
+	}
+
+	// q matches symbol or name case-insensitively, or an exact address
+	rows, err = d.ElysiumTokens(ctx, "bbb", 10)
+	if err != nil || len(rows) != 1 || rows[0].Symbol != "BBB" {
+		t.Errorf("symbol query: %+v %v", rows, err)
+	}
+	rows, err = d.ElysiumTokens(ctx, "wrapped hype", 10)
+	if err != nil || len(rows) != 1 || rows[0].Symbol != "WHYPE" {
+		t.Errorf("name query: %+v %v", rows, err)
+	}
+	rows, err = d.ElysiumTokens(ctx, strings.ToUpper(aaa), 10)
+	if err != nil || len(rows) != 1 || rows[0].Symbol != "AAA" {
+		t.Errorf("address query: %+v %v", rows, err)
+	}
+	rows, err = d.ElysiumTokens(ctx, "", 3)
+	if err != nil || len(rows) != 3 {
+		t.Errorf("limit: %+v %v", rows, err)
+	}
+}
+
+func TestElysiumCursorAndKnownTokens(t *testing.T) {
+	d := testDB(t)
+	ctx := context.Background()
+	for _, q := range []string{`delete from elysium_tokens`, `delete from elysium_cursor`} {
+		if _, err := d.pg.Exec(ctx, q); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if _, ok, err := d.ElysiumCursor(ctx, "kalos"); err != nil || ok {
+		t.Fatalf("unknown cursor = %v %v", ok, err)
+	}
+	if err := d.SetElysiumCursor(ctx, "kalos", 7_645_302); err != nil {
+		t.Fatal(err)
+	}
+	if err := d.SetElysiumCursor(ctx, "kalos", 7_645_400); err != nil {
+		t.Fatal(err)
+	}
+	block, ok, err := d.ElysiumCursor(ctx, "kalos")
+	if err != nil || !ok || block != 7_645_400 {
+		t.Fatalf("cursor = %d %v %v", block, ok, err)
+	}
+
+	known, err := d.KnownTokens(ctx, []string{"0x1111111111111111111111111111111111111111"})
+	if err != nil || len(known) != 0 {
+		t.Fatalf("known empty = %v %v", known, err)
+	}
+	if err := d.UpsertElysium(ctx, nil, []elyToken{{Address: "0x1111111111111111111111111111111111111111", Symbol: "AAA", Name: "Alpha", Decimals: 18}}); err != nil {
+		t.Fatal(err)
+	}
+	known, err = d.KnownTokens(ctx, []string{"0x1111111111111111111111111111111111111111", "0x2222222222222222222222222222222222222222"})
+	if err != nil || !known["0x1111111111111111111111111111111111111111"] || len(known) != 1 {
+		t.Fatalf("known = %v %v", known, err)
 	}
 }

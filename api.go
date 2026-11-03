@@ -4,6 +4,9 @@ import (
 	"encoding/json"
 	"log/slog"
 	"net/http"
+	"regexp"
+	"strconv"
+	"strings"
 	"time"
 )
 
@@ -57,6 +60,53 @@ func routes(s Store, now func() time.Time) http.Handler {
 			return
 		}
 		writeJSON(w, http.StatusOK, m)
+	})
+
+	tokenAddrRe := regexp.MustCompile(`^0x[0-9a-f]{40}$`)
+
+	mux.HandleFunc("GET /v1/elysium/tokens", func(w http.ResponseWriter, r *http.Request) {
+		limit := 50
+		if v := r.URL.Query().Get("limit"); v != "" {
+			if n, err := strconv.Atoi(v); err == nil && n > 0 {
+				limit = n
+			}
+		}
+		limit = min(limit, 200)
+		rows, err := s.ElysiumTokens(r.Context(), r.URL.Query().Get("q"), limit)
+		if err != nil {
+			slog.Error("read elysium tokens", "err", err)
+			writeJSON(w, http.StatusServiceUnavailable, errBody("elysium tokens unavailable"))
+			return
+		}
+		if rows == nil {
+			rows = []elyTokenRow{}
+		}
+		writeJSON(w, http.StatusOK, rows)
+	})
+
+	mux.HandleFunc("GET /v1/elysium/pools", func(w http.ResponseWriter, r *http.Request) {
+		parts := strings.Split(r.URL.Query().Get("tokens"), ",")
+		ok := len(parts) >= 2 && len(parts) <= 10
+		for _, p := range parts {
+			if !tokenAddrRe.MatchString(p) {
+				ok = false
+				break
+			}
+		}
+		if !ok {
+			writeJSON(w, http.StatusBadRequest, errBody("pass 2 to 10 token addresses"))
+			return
+		}
+		pools, err := s.ElysiumPools(r.Context(), parts)
+		if err != nil {
+			slog.Error("read elysium pools", "err", err)
+			writeJSON(w, http.StatusServiceUnavailable, errBody("elysium pools unavailable"))
+			return
+		}
+		if pools == nil {
+			pools = []elyPool{}
+		}
+		writeJSON(w, http.StatusOK, pools)
 	})
 
 	return mux
