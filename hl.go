@@ -58,3 +58,21 @@ func (h HL) Pulse(ctx context.Context, now time.Time) (Pulse, error) {
 	}
 	return computePulse(meta, ctxs, now), nil
 }
+
+func (h HL) OutcomeMeta(ctx context.Context) (outcomeMeta, error) {
+	var m outcomeMeta
+	err := h.post(ctx, map[string]string{"type": "outcomeMeta"}, &m)
+	return m, err
+}
+
+func (h HL) Templates(ctx context.Context) ([]template, error) {
+	var t []template
+	err := h.post(ctx, map[string]string{"type": "outcomeTemplates"}, &t)
+	return t, err
+}
+
+func (h HL) Mids(ctx context.Context) (map[string]string, error) {
+	var m map[string]string
+	err := h.post(ctx, map[string]string{"type": "allMids"}, &m)
+	return m, err
+}
