@@ -75,7 +75,7 @@ func run(ctx context.Context) error {
 	go every(ctx, 30*time.Second, "outcomes", pollOutcomes(hl, store))
 	go everyWithin(ctx, 60*time.Second, "elysium", 5*time.Minute, pollElysium(elys, store))
 	go everyWithin(ctx, 60*time.Second, "compare", 45*time.Second, pollCompare(hl, cmp, store))
-	go everyWithin(ctx, 60*time.Second, "perps", 45*time.Second, pollPerpsCompare(hl, pv, store))
+	go everyWithin(ctx, 60*time.Second, "perps", 55*time.Second, pollPerpsCompare(hl, pv, store))
 
 	srv := &http.Server{Addr: env("ADDR", "127.0.0.1:8790"), Handler: routes(store, time.Now), ReadHeaderTimeout: 5 * time.Second}
 	go func() {
