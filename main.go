@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"net"
 	"net/http"
 	"os"
 	"os/signal"
@@ -33,6 +34,14 @@ func main() {
 }
 
 func run(ctx context.Context) error {
+	// DNS_SERVER (host:port) resolves every outbound name through that server. Some ISPs hijack DNS for
+	// prediction-market APIs; production leaves it unset.
+	if dns := os.Getenv("DNS_SERVER"); dns != "" {
+		net.DefaultResolver = &net.Resolver{PreferGo: true, Dial: func(ctx context.Context, network, _ string) (net.Conn, error) {
+			var d net.Dialer
+			return d.DialContext(ctx, network, dns)
+		}}
+	}
 	pool, err := pgxpool.New(ctx, env("DATABASE_URL", "postgres://tora:tora@localhost:5433/tora?sslmode=disable"))
 	if err != nil {
 		return err
