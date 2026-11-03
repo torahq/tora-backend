@@ -85,6 +85,12 @@ func (d db) Featured(ctx context.Context) (Market, bool, error) {
 		if err != nil {
 			return Market{}, false, err
 		}
+		// pgx returns the session time zone; the API speaks UTC
+		m.UpdatedAt = m.UpdatedAt.UTC()
+		if m.ClosesAt != nil {
+			c := m.ClosesAt.UTC()
+			m.ClosesAt = &c
+		}
 		return m, true, nil
 	}
 	return Market{}, false, nil

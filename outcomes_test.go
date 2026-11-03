@@ -86,3 +86,23 @@ func TestRecurringBucket(t *testing.T) {
 		}
 	}
 }
+
+func TestDexUnderlyingIsNotCrypto(t *testing.T) {
+	var meta outcomeMeta
+	mustJSON(t, `{"outcomes":[
+	 {"outcome":23725,"name":"template:binaryPrice","description":"perp:xyz:GOLD|threshold:3947.6|time:20261103-2100","sideSpecs":[{"name":"Yes"},{"name":"No"}]},
+	 {"outcome":9,"name":"Recurring","description":"class:priceBinary|underlying:xyz:TSLA|expiry:20261104-0600|targetPrice:400|period:1d","sideSpecs":[{"name":"Yes"},{"name":"No"}]}
+	],"questions":[]}`, &meta)
+	var tpl []template
+	mustJSON(t, templatesFixture, &tpl)
+	got := toMarkets(meta, tpl, map[string]string{"#237250": "0.24", "#90": "0.5"}, time.Date(2026, 11, 3, 0, 0, 0, 0, time.UTC))
+	if len(got) != 2 {
+		t.Fatalf("got %+v", got)
+	}
+	if got[0].Title != "GOLD above 3,947.6 at Nov 3, 21:00 UTC?" || got[0].Category != "other" {
+		t.Errorf("gold = %q %q", got[0].Title, got[0].Category)
+	}
+	if got[1].Title != "TSLA above 400 at Nov 4, 06:00 UTC?" || got[1].Category != "other" {
+		t.Errorf("tsla = %q %q", got[1].Title, got[1].Category)
+	}
+}

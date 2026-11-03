@@ -118,8 +118,24 @@ func fillTemplate(pattern string, fields map[string]string) string {
 		if t, ok := parseStamp(v); ok {
 			return stampLabel(t)
 		}
+		if k == "perp" {
+			return assetName(v)
+		}
 		return priceText(k, v)
 	})
+}
+
+// assetName drops a HIP-3 dex prefix: "xyz:GOLD" reads as "GOLD".
+func assetName(v string) string {
+	if _, name, ok := strings.Cut(v, ":"); ok {
+		return name
+	}
+	return v
+}
+
+// onDex reports a HIP-3 underlying (stocks, commodities), which is not crypto.
+func onDex(fields map[string]string) bool {
+	return strings.Contains(fields["perp"], ":") || strings.Contains(fields["underlying"], ":")
 }
 
 // recurringTitle names Hyperliquid's recurring price markets ("class:priceBinary|..." or "class:priceBucket|...").
@@ -131,6 +147,7 @@ func recurringTitle(fields map[string]string, bucket int) (string, bool) {
 		return "", false
 	}
 	at := stampLabel(when)
+	coin = assetName(coin)
 	switch fields["class"] {
 	case "priceBinary":
 		if fields["targetPrice"] != "" {
@@ -250,6 +267,9 @@ func toMarkets(meta outcomeMeta, templates []template, mids map[string]string, n
 				id = q.Name
 			}
 			m.Category = category(strip(id))
+		}
+		if m.Category == "crypto" && onDex(fields) {
+			m.Category = "other"
 		}
 		out = append(out, m)
 	}
