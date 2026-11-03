@@ -319,7 +319,7 @@ func buildCompare(meta outcomeMeta, mids map[string]string, events []venueEvent,
 			cq, ok = compareWinner(q, f, byID, mids, events)
 		}
 		if ok {
-			cq.UpdatedAt = now
+			cq.UpdatedAt = now.UTC()
 			out = append(out, cq)
 		}
 	}
@@ -491,7 +491,7 @@ func compareMatch(q hlQuestion, f map[string]string, byID map[int]hlOutcome, mid
 		Title:       partA + " vs " + partB,
 		Competition: comp,
 		StartsAt:    &at,
-		UpdatedAt:   now,
+		UpdatedAt:   now.UTC(),
 		Outcomes:    outcomes,
 	}, true
 }

@@ -64,19 +64,27 @@ func nameTokens(s string) []string {
 // nameScore adds, for each token of a, its best match in b: equal 2, one a prefix of the other 1.
 func nameScore(a, b string) int {
 	bs := nameTokens(b)
+	used := make([]bool, len(bs)) // each token of b matches at most one token of a
 	score := 0
 	for _, x := range nameTokens(a) {
-		best := 0
-		for _, y := range bs {
+		best, at := 0, -1
+		for j, y := range bs {
+			if used[j] {
+				continue
+			}
+			s := 0
 			switch {
 			case x == y:
-				best = 2
-			case best == 0 && (strings.HasPrefix(x, y) || strings.HasPrefix(y, x)):
-				best = 1
+				s = 2
+			case strings.HasPrefix(x, y) || strings.HasPrefix(y, x):
+				s = 1
 			}
-			if best == 2 {
-				break
+			if s > best {
+				best, at = s, j
 			}
+		}
+		if at >= 0 {
+			used[at] = true
 		}
 		score += best
 	}

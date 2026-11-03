@@ -67,6 +67,7 @@ func TestPickBest(t *testing.T) {
 		{"Manchester City", []string{"Manchester City FC", "Manchester United FC"}, 0},
 		{"Los Angeles", []string{"Los Angeles C", "Los Angeles R"}, -1},
 		{"Real Madrid", []string{"Liverpool", "Arsenal"}, -1},
+		{"Cleveland Cavaliers", []string{"Los Angeles C", "Cleveland", "Los Angeles L"}, 1},
 	}
 	for _, c := range cases {
 		if got := pickBest(c.name, c.candidates); got != c.want {
